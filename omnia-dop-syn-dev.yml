@@ -1,0 +1,42 @@
+# This workflow is to test CICD feature in Synapse
+
+name: Omnia Data Overview Synapse Dev
+# Controls when the action will run. Triggers the workflow on push or pull request
+# events but only for the master branch
+on:
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    # The type of runner that the job will run on
+    runs-on: windows-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:        
+      - uses: actions/checkout@v2
+      - name: set ARMTEMPLATEURL 
+        run: echo "ARMTEMPLATEURL=workspace_publish/dataoverviewpagesynqa/TemplateForWorkspace.json" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: set SUBSCRIPTIONID
+        run: echo "SUBSCRIPTIONID=1d1ba129-149e-4533-a8e2-266d7a4a92ac" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: set SYNNAME
+        run: echo "SYNNAME=dataoverviewpagesyndev" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v2
+        with:
+          ref: workspace_publish
+          path: 'workspace_publish'
+      - name: Login via Az module
+        uses: azure/login@v1.1
+        with:
+          creds: ${{secrets.CREDENTIALS_SYNDEV}}  
+      - name: Deploy Synapse ARM template
+        uses: azure/arm-deploy@v1
+        with:
+          subscriptionId: ${{env.SUBSCRIPTIONID}}
+          resourceGroupName: DataOverviewPageRGDEV
+          template: ${{env.ARMTEMPLATEURL}}
+          parameters: workspaceName=${{env.SYNNAME}} 
+

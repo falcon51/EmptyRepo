@@ -1,0 +1,134 @@
+{
+	"$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+	"contentVersion": "1.0.0.0",
+	"parameters": {
+		"workspaceName": {
+			"type": "string",
+			"metadata": "Workspace name",
+			"defaultValue": "dataoverviewpagesynqa"
+		},
+		"omniadlseun_properties_typeProperties_url": {
+			"type": "string",
+			"defaultValue": "https://omniadlseun.dfs.core.windows.net"
+		}
+	},
+	"variables": {
+		"workspaceId": "[concat('Microsoft.Synapse/workspaces/', parameters('workspaceName'))]"
+	},
+	"resources": [
+		{
+			"name": "[concat(parameters('workspaceName'), '/omniadlseun')]",
+			"type": "Microsoft.Synapse/workspaces/linkedServices",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"annotations": [],
+				"type": "AzureBlobFS",
+				"typeProperties": {
+					"url": "[parameters('omniadlseun_properties_typeProperties_url')]"
+				},
+				"connectVia": {
+					"referenceName": "AutoResolveIntegrationRuntime",
+					"type": "IntegrationRuntimeReference"
+				}
+			},
+			"dependsOn": [
+				"[concat(variables('workspaceId'), '/integrationRuntimes/AutoResolveIntegrationRuntime')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/AutoResolveIntegrationRuntime')]",
+			"type": "Microsoft.Synapse/workspaces/integrationRuntimes",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"type": "Managed",
+				"typeProperties": {
+					"computeProperties": {
+						"location": "AutoResolve",
+						"dataFlowProperties": {
+							"computeType": "General",
+							"coreCount": 8,
+							"timeToLive": 0
+						}
+					}
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/cicdtest')]",
+			"type": "Microsoft.Synapse/workspaces/sqlscripts",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"content": {
+					"query": "--this is test script file",
+					"metadata": {
+						"language": "sql"
+					},
+					"currentConnection": {
+						"name": "master",
+						"type": "SqlOnDemand"
+					}
+				},
+				"type": "SqlQuery"
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/create_aggregation_views')]",
+			"type": "Microsoft.Synapse/workspaces/sqlscripts",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"content": {
+					"query": "USE dop_report;\nGO\n\n-- create a view for events aggregation for previous day, use for overview page\nSET ANSI_NULLS ON\nGO\nSET QUOTED_IDENTIFIER ON\nGO\nCREATE VIEW [enterprise].[Last_Day_Events_Agg] AS\nselect \n    count(*) as last_day_number_of_events,\n    sum(cast(RowsTransferred as bigint)) as last_day_rows,\n    sum(cast(BytesTransferred as bigint)) as last_day_bytes    \nfrom [enterprise].[DOP_Event_All_v2]\nwhere Date<dateadd(day,datediff(day,0,GETDATE()),0) and Date>=dateadd(day,datediff(day,1,GETDATE()),0)\nGO\n\n-- create a view for total events aggregation, use for overview page\nSET ANSI_NULLS ON\nGO\nSET QUOTED_IDENTIFIER ON\nGO\nCREATE VIEW [enterprise].[Total_Events_Agg] AS\nselect \n    count(*) as number_of_events,\n    sum(cast(RowsTransferred as bigint)) as total_rows,\n    sum(cast(BytesTransferred as bigint)) as total_bytes\nfrom [enterprise].[DOP_Event_All_v2]\nGO\n\n-- create a view for events aggregation for previous day per pipeline, use for pipeline overview page\nSET ANSI_NULLS ON\nGO\nSET QUOTED_IDENTIFIER ON\nGO\nCREATE VIEW [enterprise].[Per_Pipeline_Last_Day_Events_Agg] AS\nselect\n      [PipelineId],\n      count(*) as pipeline_last_day_number_of_events,\n      sum(cast(RowsTransferred as bigint)) as pipeline_last_day_rows,\n      sum(cast(BytesTransferred as bigint)) as pipeline_last_day_bytes\nfrom [enterprise].[DOP_Event_All_v2]\nwhere Date<dateadd(day,datediff(day,0,GETDATE()),0) and Date>=dateadd(day,datediff(day,1,GETDATE()),0)\ngroup by PipelineId\nGO\n\n-- create a view for total events aggregation per pipeline, use for pipeline overview page\nSET ANSI_NULLS ON\nGO\nSET QUOTED_IDENTIFIER ON\nGO\nCREATE VIEW [enterprise].[Per_Pipeline_Events_Agg] AS\nselect\n      [PipelineId],\n      [PipelineName],\n      count(*) as pipeline_number_of_events,\n      sum(cast(RowsTransferred as bigint)) as pipeline_rows,\n      sum(cast(BytesTransferred as bigint)) as pipeline_bytes\nfrom [enterprise].[DOP_Events_Pipelines_All]\ngroup by PipelineId, PipelineName\nGO\n\n-- create a view for historical events aggregation per pipeline, use for pipeline overview page \nSET ANSI_NULLS ON\nGO\nSET QUOTED_IDENTIFIER ON\nGO\nCREATE VIEW [enterprise].[Historical_Per_Pipeline_Events_Agg] AS\nselect \n    [Date],\n    [PipelineId],\n    [PipelineName],\n    count(*) as historical_number_of_events,\n    sum(cast(RowsTransferred as bigint)) as historical_total_rows,\n    sum(cast(BytesTransferred as bigint)) as historical_total_bytes\nfrom [enterprise].[DOP_Event_All_v2_Transfer]\ngroup by Date, PipelineId,PipelineName\nGO\n\n-- create a view for total historical events aggregation, use for overview page \nSET ANSI_NULLS ON\nGO\nSET QUOTED_IDENTIFIER ON\nGO\nCREATE VIEW [enterprise].[Historical_Events_Agg] AS\nselect \n    [Date],\n    count(*) as historical_number_of_events,\n    sum(cast(RowsTransferred as bigint)) as historical_total_rows,\n    sum(cast(BytesTransferred as bigint)) as historical_total_bytes\nfrom [enterprise].[DOP_Event_All_v2_Transfer]\ngroup by Date\nGO\n\n-- create a view for numbers of events per event type per pipeline, use for pipeline overview page\nSET ANSI_NULLS ON\nGO\nSET QUOTED_IDENTIFIER ON\nGO\nCREATE VIEW [enterprise].[Per_Pipeline_Per_Event_Type] AS\nselect \n    [PipelineId], \n    [PipelineName],   \n    [Type],\n    count(*) as event_num\nfrom [enterprise].[DOP_Events_Pipelines_All]\ngroup by [PipelineId],[PipelineName], [Type]\nGO\n\n-- create a view for number of events per event status per pipeline, use for pipeline overview page\nSET ANSI_NULLS ON\nGO\nSET QUOTED_IDENTIFIER ON\nGO\nCREATE VIEW [enterprise].[Per_Pipeline_Per_Event_Status] AS\nselect \n    [PipelineId],\n    [PipelineName],\n    [Status],\n    count(*) as event_num\nfrom [enterprise].[Event_Status_Transfer]\ngroup by [PipelineId], [PipelineName],[Status]\nGO\n\n-- create a view for number of events per event load type per pipeline, use for pipeline overview page\nSET ANSI_NULLS ON\nGO\nSET QUOTED_IDENTIFIER ON\nGO\nCREATE VIEW [enterprise].[Per_Pipeline_Per_Event_LoadType] AS\nselect \n    [PipelineId],\n    [PipelineName],\n    [LoadType],\n    count(*) as event_num\nfrom [enterprise].[DOP_Events_Pipelines_All]\ngroup by [PipelineId],[PipelineName], [LoadType]\nGO\n\n-- create a view for number of failed events per error per pipeline, assume error is logged in Information column, use for pipeline overview page \nSET ANSI_NULLS ON\nGO\nSET QUOTED_IDENTIFIER ON\nGO\nCREATE VIEW [enterprise].[Per_Pipeline_Top_10_Errors] AS\nselect TOP(10)\n    [PipelineId],\n    [PipelineName],\n    [Information],\n    count(*) as failure_num\nfrom [enterprise].[Event_Status_Transfer]\nwhere Status='Failure'\ngroup by [PipelineId],[PipelineName], [Information]\norder by failure_num desc\nGO\n\n-- create a view for top 10 pipelines with most total bytes, use for overview page\nSET ANSI_NULLS ON\nGO\nSET QUOTED_IDENTIFIER ON\nGO\nCREATE VIEW [enterprise].[Total_Top_10_Pipeline_Bytes] AS\nselect TOP(10)\n    [PipelineId],\n    [PipelineName],\n    [pipeline_bytes]\nfrom [enterprise].[Per_Pipeline_Events_Agg]\norder by pipeline_bytes desc\nGO\n\n-- create a view for total bytes per source, use for overview page\nSET ANSI_NULLS ON\nGO\nSET QUOTED_IDENTIFIER ON\nGO\nCREATE VIEW [enterprise].[Total_Per_Source_Bytes] AS\nselect \n    [Source],\n    sum([pipeline_bytes]) as total_bytes\nfrom [enterprise].[Per_Pipeline_Transfer]\ngroup by [Source]\nGO\n\n-- create a view for total bytes per destination, use for overview page\nSET ANSI_NULLS ON\nGO\nSET QUOTED_IDENTIFIER ON\nGO\nCREATE VIEW [enterprise].[Total_Per_Destination_Bytes] AS\nselect \n    [Destination],\n    sum([pipeline_bytes]) as total_bytes\nfrom [enterprise].[Per_Pipeline_Transfer]\ngroup by [Destination]\nGO\n\n-- create a view for total bytes per data area level 1, use for overview page\nSET ANSI_NULLS ON\nGO\nSET QUOTED_IDENTIFIER ON\nGO\nCREATE VIEW [enterprise].[Total_Per_DataAreaL1_Bytes] AS\nselect \n    [DataAreaL1],\n    sum([pipeline_bytes]) as total_bytes\nfrom [enterprise].[Per_Pipeline_Transfer]\ngroup by [DataAreaL1]\nGO\n",
+					"metadata": {
+						"language": "sql"
+					},
+					"currentConnection": {
+						"name": "dop_report",
+						"type": "SqlOnDemand"
+					}
+				},
+				"type": "SqlQuery"
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/create_basic_views')]",
+			"type": "Microsoft.Synapse/workspaces/sqlscripts",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"content": {
+					"query": "USE dop_report;\nGO\n\n-- create a view for all pipelines\nSET ANSI_NULLS ON\nGO\nSET QUOTED_IDENTIFIER ON\nGO\nCREATE VIEW [enterprise].[DOP_Pipeline_All_v2] AS\nSELECT * \nFROM OPENROWSET(\n        BULK 'https://omniadlseun.blob.core.windows.net/dls/team/omniacoredata/dop-qa/Pipeline.parquet',\n         FORMAT = 'parquet'\n    )\nWITH(\n    [EventPipelineId] varchar(36) 1,\n    [PipelineName] varchar(100) 2,\n    [Created] datetime2,\n    [ApiRef] varchar(255),\n    [DataCatalogRef] varchar(255),\n    [Team] varchar(100),\n    [Source] varchar(100),\n    [Destination] varchar(100),\n    [DataAreaL1] varchar(100),\n    [DataAreaL2] varchar(100),\n    [Responsible] varchar(36),\n    [LastUpdatedBy] varchar(36),\n    [Updated] datetime2,\n    [Deleted] datetime2\n)\nAS [r];\nGO\n\n\n-- create a view for all events before the delta copy for previous day started on 2020/11/17\nSET ANSI_NULLS ON\nGO\nSET QUOTED_IDENTIFIER ON\nGO\nCREATE VIEW [enterprise].[DOP_Event_11_15] AS\nSELECT * \nFROM OPENROWSET(\n        BULK 'https://omniadlseun.blob.core.windows.net/dls/team/omniacoredata/dop-qa/2020/11/15/Event.parquet',\n         FORMAT = 'parquet'\n    )\nWITH(\n    [Id] varchar(36),\n    [PipelineId] varchar(36),\n    [Date] datetime2,\n    [Type] varchar(100),\n    [Status] varchar(100),\n    [Information] varchar(255),\n    [RowsTransferred] int,\n    [BytesTransferred] int,\n    [LoadType] varchar(5),\n    [CorrelationId] varchar(36)\n)\nAS [r];\nGO\n\n\n-- create a view for all events happened after 2020/11/15\nSET ANSI_NULLS ON\nGO\nSET QUOTED_IDENTIFIER ON\nGO\nCREATE VIEW [enterprise].[DOP_Event_Delta] AS\nSELECT * \nFROM OPENROWSET(\n        BULK 'https://omniadlseun.blob.core.windows.net/dls/team/omniacoredata/dop-qa/*/*/*/Event_Delta.parquet',\n         FORMAT = 'parquet'\n    )\nWITH(\n    [Id] varchar(36),\n    [PipelineId] varchar(36),\n    [Date] datetime2,\n    [Type] varchar(100),\n    [Status] varchar(100),\n    [Information] varchar(255),\n    [RowsTransferred] int,\n    [BytesTransferred] int,\n    [LoadType] varchar(5),\n    [CorrelationId] varchar(36)\n)\nAS [r];\nGO\n\n\n-- create a view for all events by joining DOP_Event_11_15 and DOP_Event_Delta\nSET ANSI_NULLS ON\nGO\nSET QUOTED_IDENTIFIER ON\nGO\nCREATE VIEW [enterprise].[DOP_Event_All_v2] AS\nSELECT * FROM [enterprise].[DOP_Event_Delta]\nUNION ALL\nSELECT * FROM [enterprise].[DOP_Event_11_15] \nAS [r];\nGO\n",
+					"metadata": {
+						"language": "sql"
+					},
+					"currentConnection": {
+						"name": "dop_report",
+						"type": "SqlOnDemand"
+					}
+				},
+				"type": "SqlQuery"
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/create_transfer_views')]",
+			"type": "Microsoft.Synapse/workspaces/sqlscripts",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"content": {
+					"query": "USE dop_report;\nGO\n\n-- create a transfer view for all events by changing Date column from datetime2 into date\nSET ANSI_NULLS ON\nGO\nSET QUOTED_IDENTIFIER ON\nGO\ncreate VIEW [enterprise].[DOP_Event_All_v2_Transfer] AS\nselect \n    Id,\n    PipelineId,\n    cast([Date] as date) as Date,\n    Type,\n    Status,\n    Information,\n    RowsTransferred,\n    BytesTransferred,\n    LoadType\nfrom [enterprise].[DOP_Event_All_v2]\nGO\n\n-- create a transfer view for all events by unifying event status to 'Success' and 'Failure'\nSET ANSI_NULLS ON\nGO\nSET QUOTED_IDENTIFIER ON\nGO\nCREATE VIEW [enterprise].[Event_Status_Transfer] AS\nselect \n       [Id]\n      ,[PipelineId]\n      ,[PipelineName]\n      ,[Date]\n      ,[Type]\n      ,case when (lower(Status)='success' or lower(Status)='sucess' or lower(Status)='succeeded' or lower(Status)='successful' or lower(Status)='succeed') \n       then 'Success'\n       when (lower(Status)='failure' or lower(Status)='failed' or lower(Status)='fail') \n       then 'Failure'\n       else Status end as Status\n      ,[Information]\n      ,[RowsTransferred]\n      ,[BytesTransferred]\n      ,[LoadType]\nfrom [enterprise].[DOP_Events_Pipelines_ALL]\nGO\n\n-- create a transfer view for all pipelines by joining pipeline configuration data and per pipeline aggregation\nSET ANSI_NULLS ON\nGO\nSET QUOTED_IDENTIFIER ON\nGO\nCREATE VIEW [enterprise].[Per_Pipeline_Transfer] AS\nSELECT \n    [EventPipelineId],\n    [enterprise].[DOP_Pipeline_All_v2].[PipelineName] as EventPipelineName,\n    [Created] ,\n    [ApiRef] ,\n    [DataCatalogRef] ,\n    [Team] ,\n    [Source] ,\n    [Destination] ,\n    [DataAreaL1] ,\n    [DataAreaL2] ,\n    [Responsible] ,\n    [LastUpdatedBy] ,\n    [Updated] ,\n    [Deleted],\n    [pipeline_number_of_events],\n    [pipeline_rows],\n    [pipeline_bytes]\nFROM [enterprise].[DOP_Pipeline_All_v2]\ninner join [enterprise].[Per_Pipeline_Events_Agg]\non [enterprise].[DOP_Pipeline_All_v2].EventPipelineId = [enterprise].[Per_Pipeline_Events_Agg].PipelineId\nGO\n\n-- create a view for all events with its pipeline info attached\nSET ANSI_NULLS ON\nGO\nSET QUOTED_IDENTIFIER ON\nGO\nCREATE VIEW [enterprise].[DOP_Events_Pipelines_ALL] AS\nSELECT * FROM [enterprise].[DOP_Pipeline_All_v2]\ninner join [enterprise].[DOP_Event_All_v2]\non [enterprise].[DOP_Pipeline_All_v2].EventPipelineId = [enterprise].[DOP_Event_All_v2].PipelineId\nGO\n\n",
+					"metadata": {
+						"language": "sql"
+					},
+					"currentConnection": {
+						"name": "dop_report",
+						"type": "SqlOnDemand"
+					}
+				},
+				"type": "SqlQuery"
+			},
+			"dependsOn": []
+		}
+	]
+}
